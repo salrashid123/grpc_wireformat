@@ -1,4 +1,4 @@
-### gRPC Unary requests the hard way: using protorefelect, dynamicpB and wireencoding to send messages
+## gRPC Unary requests the hard way: using protorefelect, dynamicpb and wire-encoding to send messages
 
 
 This is just an academic exercise to create a probuf message and its [wireformat](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md) by basic reflection packages go provides.
