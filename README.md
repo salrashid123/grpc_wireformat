@@ -38,8 +38,11 @@ message EchoReply {
 1. Load and Register its binary protobuf definition `echo.pb`
 2. Create an `EchoRequest` message using [protoreflect](https://pkg.go.dev/google.golang.org/protobuf/reflect/protoreflect) and [dynamicpb](https://pkg.go.dev/google.golang.org/protobuf/types/dynamicpb)
 3. Either
-  a. Create Message Descriptor add fields
-  b. Create Message using anypb and protojson
+
+     * a. Create Message Descriptor add fields
+  
+     * b. Create Message using anypb and protojson
+
 4. Encode that message into gRPC's Unary wireformat
 5. Send that to a gRPC server using _an ordinary `net/http` client over `http2`
 6. Recieve the wireformat response
