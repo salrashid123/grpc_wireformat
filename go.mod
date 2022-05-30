@@ -10,7 +10,7 @@ require (
 require (
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/psanford/lencode v0.3.0 // indirect
-	github.com/salrashid123/grpc_health_proxy/example/src/echo v0.0.0
+	github.com/salrashid123/grpc_wireformat/grpc_services/src/echo v0.0.0
 	golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4 // indirect
 	golang.org/x/sys v0.0.0-20210510120138-977fb7262007 // indirect
 	golang.org/x/text v0.3.5 // indirect
@@ -19,4 +19,4 @@ require (
 
 require github.com/gogo/protobuf v1.3.2 // indirect
 
-replace github.com/salrashid123/grpc_health_proxy/example/src/echo => ./grpc_services/src/echo
+replace github.com/salrashid123/grpc_wireformat/grpc_services/src/echo => ./grpc_services/src/echo

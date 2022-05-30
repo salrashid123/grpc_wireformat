@@ -17,7 +17,7 @@ WORKDIR /app
 ADD . /app
 RUN go mod download
 
-RUN protoc --go_out=. --go_opt=paths=source_relative  --descriptor_set_out=src/echo/echo.proto.pb   --go-grpc_out=. --go-grpc_opt=paths=source_relative     src/echo/echo.proto
+RUN protoc --go_out=. --go_opt=paths=source_relative --descriptor_set_out=src/echo/echo.pb  --go-grpc_out=. --go-grpc_opt=paths=source_relative     src/echo/echo.proto
 
 RUN export GOBIN=/app/bin && go install src/grpc_server.go
 RUN export GOBIN=/app/bin && go install src/grpc_client.go

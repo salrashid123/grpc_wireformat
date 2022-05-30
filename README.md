@@ -19,7 +19,7 @@ However, just as a way to see what you can do under the hood using 'first princi
 syntax = "proto3";
 
 package echo;
-option go_package = "github.com/salrashid123/grpc_dynamic_pb/example/src/echo";
+option go_package = "github.com/salrashid123/grpc_wireformat/grpc_services/src/echo";
 
 service EchoServer {
   rpc SayHello (EchoRequest) returns (EchoReply) {}

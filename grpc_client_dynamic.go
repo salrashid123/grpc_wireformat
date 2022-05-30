@@ -109,7 +109,7 @@ func main() {
 	// }
 	// fmt.Printf("Unmarshalled using proto %s\n", eresp.FirstName)
 
-	j := `{	"@type": "echo.EchoRequest", "firstName": "sal", "lastName": "amander"}`
+	j := `{	"@type": "echo.EchoRequest", "firstName": "ddsal", "lastName": "amander"}`
 	a, err := anypb.New(echoRequestMessageType.New().Interface())
 	if err != nil {
 		panic(err)

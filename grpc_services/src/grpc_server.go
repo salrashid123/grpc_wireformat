@@ -7,7 +7,7 @@ import (
 	"os"
 	"sync"
 
-	echo "github.com/salrashid123/grpc_dynamic_pb/example/src/echo"
+	echo "github.com/salrashid123/grpc_wireformat/grpc_services/src/echo"
 
 	"log"
 
@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	grpcport = flag.String("grpcport", "", "grpcport")
+	grpcport = flag.String("grpcport", ":50051", "grpcport")
 	tlsCert  = flag.String("tlsCert", "certs/localhost.crt", "TLS Cert")
 	tlsKey   = flag.String("tlsKey", "certs/localhost.key", "TLS Key")
 	tlsCA    = flag.String("tlsCA", "certs/tls-ca-chain.pem", "TLS CA")
