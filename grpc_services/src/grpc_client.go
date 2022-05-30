@@ -1,15 +1,19 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
+	"io/ioutil"
 	"time"
 
 	echo "github.com/salrashid123/grpc_dynamic_pb/example/src/echo"
 
-	log "github.com/golang/glog"
+	"log"
 
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
@@ -17,19 +21,34 @@ const ()
 
 var (
 	conn *grpc.ClientConn
+
+	address         = flag.String("host", "localhost:50051", "host:port of gRPC server")
+	cacert          = flag.String("cacert", "certs/tls-ca-chain.pem", "CACert for server")
+	serverName      = flag.String("servername", "localhost", "SNI for server")
+	skipHealthCheck = flag.Bool("skipHealthCheck", false, "Skip Initial Healthcheck")
 )
 
 func main() {
 
-	address := flag.String("host", "localhost:50051", "host:port of gRPC server")
-	skipHealthCheck := flag.Bool("skipHealthCheck", false, "Skip Initial Healthcheck")
-
 	flag.Parse()
 
-	var err error
+	caCert, err := ioutil.ReadFile(*cacert)
+	if err != nil {
+		log.Fatalf("did not load ca: %v", err)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
 	var conn *grpc.ClientConn
 
-	conn, err = grpc.Dial(*address, grpc.WithInsecure())
+	tlsConfig := tls.Config{
+		ServerName: *serverName,
+		RootCAs:    caCertPool,
+	}
+
+	creds := credentials.NewTLS(&tlsConfig)
+
+	conn, err = grpc.Dial(*address, grpc.WithTransportCredentials(creds))
 
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
@@ -52,7 +71,7 @@ func main() {
 		if resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
 			log.Fatalf("service not in serving state: ", resp.GetStatus().String())
 		}
-		log.Infof("RPC HealthChekStatus: %v\n", resp.GetStatus())
+		log.Printf("RPC HealthChekStatus: %v\n", resp.GetStatus())
 	}
 	// now make a gRPC call
 
@@ -60,6 +79,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not greet: %v", err)
 	}
-	log.Infof("RPC Response: %v\n", r)
+	log.Printf("RPC Response: %v\n", r)
 
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"net"
 	"os"
@@ -8,9 +9,10 @@ import (
 
 	echo "github.com/salrashid123/grpc_dynamic_pb/example/src/echo"
 
-	log "github.com/golang/glog"
+	"log"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
 	"golang.org/x/net/context"
@@ -21,6 +23,9 @@ import (
 
 var (
 	grpcport = flag.String("grpcport", "", "grpcport")
+	tlsCert  = flag.String("tlsCert", "certs/localhost.crt", "TLS Cert")
+	tlsKey   = flag.String("tlsKey", "certs/localhost.key", "TLS Key")
+	tlsCA    = flag.String("tlsCA", "certs/tls-ca-chain.pem", "TLS CA")
 )
 
 const (
@@ -44,7 +49,7 @@ func NewServer() *Server {
 
 func (s *Server) SayHello(ctx context.Context, in *echo.EchoRequest) (*echo.EchoReply, error) {
 
-	log.Infof("Got rpc: --> %s\n", in.FirstName)
+	log.Printf("Got rpc: --> %s\n", in.FirstName)
 
 	return &echo.EchoReply{Message: "Hello " + in.FirstName + " " + in.LastName}, nil
 }
@@ -73,29 +78,38 @@ func (s *Server) Watch(in *healthpb.HealthCheckRequest, srv healthpb.Health_Watc
 
 func main() {
 
-	flag.Set("logtostderr", "true")
-	flag.Set("stderrthreshold", "INFO")
 	flag.Parse()
 
 	if *grpcport == "" {
-		log.Errorf("missing -grpcport flag (:50051)")
+		log.Printf("missing -grpcport flag (:50051)")
 		flag.Usage()
 		os.Exit(2)
 	}
+
+	certificate, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
+	if err != nil {
+		log.Fatalf("could not load server key pair: %s", err)
+	}
+
+	tlsConfig := tls.Config{
+		Certificates: []tls.Certificate{certificate},
+	}
+	creds := credentials.NewTLS(&tlsConfig)
 
 	lis, err := net.Listen("tcp", *grpcport)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
-	sopts := []grpc.ServerOption{}
+	sopts := []grpc.ServerOption{grpc.MaxConcurrentStreams(10)}
+	sopts = append(sopts, grpc.Creds(creds))
 
 	s := grpc.NewServer(sopts...)
 	srv := NewServer()
 	healthpb.RegisterHealthServer(s, srv)
 	echo.RegisterEchoServerServer(s, srv)
 	reflection.Register(s)
-	log.Info("Starting Server...")
+	log.Println("Starting Server...")
 	s.Serve(lis)
 
 }

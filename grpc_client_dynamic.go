@@ -3,17 +3,16 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
-	"net"
 
 	"github.com/psanford/lencode"
 	"golang.org/x/net/http2"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -29,7 +28,9 @@ import (
 const ()
 
 var (
-	conn *grpc.ClientConn
+	cacert     = flag.String("cacert", "grpc_services/certs/tls-ca-chain.pem", "CACert for server")
+	url        = flag.String("url", "https://localhost:50051/echo.EchoServer/SayHello", "gRPC server fully qualified")
+	serverName = flag.String("servername", "localhost", "SNI for server")
 )
 
 func main() {
@@ -40,8 +41,6 @@ func main() {
 	pbFiles := []string{
 		"grpc_services/src/echo/echo.pb",
 	}
-
-	var fd protoreflect.FileDescriptor
 
 	for _, fileName := range pbFiles {
 
@@ -56,19 +55,20 @@ func main() {
 			panic(err)
 		}
 		for _, pb := range fileDescriptors.GetFile() {
-			fd, err = protodesc.NewFile(pb, protoregistry.GlobalFiles)
+			var fdr protoreflect.FileDescriptor
+			fdr, err = protodesc.NewFile(pb, protoregistry.GlobalFiles)
 			if err != nil {
 				panic(err)
 			}
-			fmt.Printf("Loading package %s\n", fd.Package().Name())
-			err = protoregistry.GlobalFiles.RegisterFile(fd)
+			fmt.Printf("Loading package %s\n", fdr.Package().Name())
+			err = protoregistry.GlobalFiles.RegisterFile(fdr)
 			if err != nil {
 				panic(err)
 			}
 			for _, m := range pb.MessageType {
 
 				fmt.Printf("  Registering MessageType: %s\n", *m.Name)
-				md := fd.Messages().ByName(protoreflect.Name(*m.Name))
+				md := fdr.Messages().ByName(protoreflect.Name(*m.Name))
 				mdType := dynamicpb.NewMessageType(md)
 
 				err = protoregistry.GlobalTypes.RegisterMessage(mdType)
@@ -77,11 +77,13 @@ func main() {
 				}
 			}
 		}
-
 	}
 
-	echoRequestMessageDescriptor := fd.Messages().ByName("EchoRequest")
-	echoRequestMessageType := dynamicpb.NewMessageType(echoRequestMessageDescriptor)
+	echoRequestMessageType, err := protoregistry.GlobalTypes.FindMessageByName("echo.EchoRequest")
+	if err != nil {
+		panic(err)
+	}
+	echoRequestMessageDescriptor := echoRequestMessageType.Descriptor()
 
 	fname := echoRequestMessageDescriptor.Fields().ByName("first_name")
 	lname := echoRequestMessageDescriptor.Fields().ByName("last_name")
@@ -130,19 +132,38 @@ func main() {
 	fmt.Printf("wire encoded EchoRequest: %s\n", hex.EncodeToString(out.Bytes()))
 
 	// make the grpc call
-	// fake out the TLS since go wants to see tls with http2
+	// fake out the TLS  if you want to decode using wireshark
 	// https://medium.com/@thrawn01/http-2-cleartext-h2c-client-example-in-go-8167c7a4181e
+	// client := http.Client{
+	// 	Transport: &http2.Transport{
+	// 		AllowHTTP: true,
+	// 		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+	// 			return net.Dial(network, addr)
+	// 		},
+	// 	},
+	// }
+
+	// or load and use TLS
+	caCert, err := ioutil.ReadFile(*cacert)
+	if err != nil {
+		log.Fatalf("did not load ca: %v", err)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	tlsConfig := tls.Config{
+		ServerName: *serverName,
+		RootCAs:    caCertPool,
+	}
+
 	client := http.Client{
 		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-				return net.Dial(network, addr)
-			},
+			TLSClientConfig: &tlsConfig,
 		},
 	}
 
 	reader := bytes.NewReader(out.Bytes())
-	resp, err := client.Post("http://localhost:50051/echo.EchoServer/SayHello", "application/grpc", reader)
+	resp, err := client.Post(*url, "application/grpc", reader)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -161,15 +182,19 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("Encoded EchoReply %s\n", hex.EncodeToString(respMessageBytes))
-	echoResponseMessageDescriptor := fd.Messages().ByName("EchoReply")
-	echoResponseMessageType := dynamicpb.NewMessageType(echoResponseMessageDescriptor)
-	pmr := echoResponseMessageType.New()
+
+	echoReplyMessageType, err := protoregistry.GlobalTypes.FindMessageByName("echo.EchoReply")
+	if err != nil {
+		panic(err)
+	}
+	echoReplyMessageDescriptor := echoReplyMessageType.Descriptor()
+	pmr := echoReplyMessageType.New()
 
 	err = proto.Unmarshal(respMessageBytes, pmr.Interface())
 	if err != nil {
 		panic(err)
 	}
-	msg := echoResponseMessageDescriptor.Fields().ByName("message")
+	msg := echoReplyMessageDescriptor.Fields().ByName("message")
 
 	fmt.Printf("EchoReply.Message using protoreflect: %s\n", pmr.Get(msg).String())
 

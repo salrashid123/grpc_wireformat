@@ -59,6 +59,7 @@ for some background, also see
 * [Using Wireshark to decrypt TLS gRPC Client-Server protobuf messages](https://blog.salrashid.dev/articles/2021/wireshark-grpc-tls/)
 * [Envoy TAP filter for gRPC](https://blog.salrashid.dev/articles/2021/envoy_tap/)
 
+
 ![images/arch.png](images/arch.png)
 
 ---
@@ -102,7 +103,7 @@ First step is for your go app to even know about the protobuf...so we need to lo
 
 2. Create Message
 
-Next we construct our `EchoRequest` using the protodescriptor from step 1.
+Next we construct our `echo.EchoRequest` using the protodescriptor from step 1.
 
 I found two ways to do this:  in `3a` below, we will "strongly type" create a message and in `3b`, we will create a message using a JSON string.   (the latter is more dangerous and is subject to simple typos)
 
@@ -115,9 +116,8 @@ I found two ways to do this:  in `3a` below, we will "strongly type" create a me
 In the following, you know which type you want to create so we do this by hand:
 
 ```golang
-	echoRequestMessageDescriptor := fd.Messages().ByName("EchoRequest")
-
-	echoRequestMessageType := dynamicpb.NewMessageType(echoRequestMessageDescriptor)
+	echoRequestMessageType, err := protoregistry.GlobalTypes.FindMessageByName("echo.EchoRequest")
+	echoRequestMessageDescriptor := echoRequestMessageType.Descriptor()
 
 	fname := echoRequestMessageDescriptor.Fields().ByName("first_name")
 	lname := echoRequestMessageDescriptor.Fields().ByName("last_name")
@@ -199,11 +199,16 @@ Use `lencode` to unmarshall the payload
 We now do the inverse of the outbound steps still using the descriptors we originally setup
 
 ```golang
-	echoResponseMessageDescriptor := fd.Messages().ByName("EchoReply")
-	echoResponseMessageType := dynamicpb.NewMessageType(echoResponseMessageDescriptor)
-	pmr := echoResponseMessageType.New()
+	echoReplyMessageType, err := protoregistry.GlobalTypes.FindMessageByName("echo.EchoReply")
+
+	echoReplyMessageDescriptor := echoReplyMessageType.Descriptor()
+	pmr := echoReplyMessageType.New()
+
 	err = proto.Unmarshal(respMessageBytes, pmr.Interface())
-	msg := echoResponseMessageDescriptor.Fields().ByName("message")
+
+	msg := echoReplyMessageDescriptor.Fields().ByName("message")
+
+	fmt.Printf("EchoReply.Message using protoreflect: %s\n", pmr.Get(msg).String())
 ```
 
 9. print the contents of `EchoReply`
@@ -262,6 +267,28 @@ $ echo -n "0a1148656c6c6f2073616c20616d616e646572" | xxd -r -p | protoc --decode
 
 ---
 
+### Using github.com/jhump/protoreflect
+
+This repo also contains an end-to-end sample of [github.com/jhump/protoreflect](https://github.com/jhump/protoreflect).
+
+Using that library makes certain things a lot easer as it wraps some of the legwork for you.  You can also "just load" a `.proto` file that includes specifications of the Message and gRPC server.
+
+To use that,
+
+```bash
+cd jhump_client/
+$ go run grpc_client_jhump.go 
+> service echo.EchoServer
+  * method echo.EchoServer.SayHello (echo.EchoRequest) echo.EchoReply
+- message echo.EchoRequest
+- message echo.EchoReply
+Looking for serviceName echo.EchoServer methodName SayHello
+Response: {
+	"message": "Hello sal amander"
+}
+```
+
+---
 #### gRPC Reflection
 
 The default gRPC server here also has [gRPC Reflection](https://github.com/grpc/grpc/blob/master/doc/server-reflection.md) enabled for inspection.
