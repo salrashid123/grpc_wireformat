@@ -14,12 +14,14 @@ import (
 	"github.com/psanford/lencode"
 	"golang.org/x/net/http2"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/dynamicpb"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"net/http"
 )
@@ -34,33 +36,56 @@ func main() {
 
 	flag.Parse()
 
-	protoFile, err := ioutil.ReadFile("grpc_services/src/echo/echo.pb")
-	if err != nil {
-		panic(err)
+	// we're assuming `echo.pb` here has all that we need for this protobuf
+	pbFiles := []string{
+		"grpc_services/src/echo/echo.pb",
 	}
 
-	fileDescriptors := &descriptorpb.FileDescriptorSet{}
-	err = proto.Unmarshal(protoFile, fileDescriptors)
-	if err != nil {
-		panic(err)
-	}
+	var fd protoreflect.FileDescriptor
 
-	// pick the first one since we know this is it
-	pb := fileDescriptors.GetFile()[0]
-	fd, err := protodesc.NewFile(pb, protoregistry.GlobalFiles)
-	if err != nil {
-		panic(err)
-	}
+	for _, fileName := range pbFiles {
 
-	err = protoregistry.GlobalFiles.RegisterFile(fd)
-	if err != nil {
-		panic(err)
+		protoFile, err := ioutil.ReadFile(fileName)
+		if err != nil {
+			panic(err)
+		}
+
+		fileDescriptors := &descriptorpb.FileDescriptorSet{}
+		err = proto.Unmarshal(protoFile, fileDescriptors)
+		if err != nil {
+			panic(err)
+		}
+		for _, pb := range fileDescriptors.GetFile() {
+			fd, err = protodesc.NewFile(pb, protoregistry.GlobalFiles)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Printf("Loading package %s\n", fd.Package().Name())
+			err = protoregistry.GlobalFiles.RegisterFile(fd)
+			if err != nil {
+				panic(err)
+			}
+			for _, m := range pb.MessageType {
+
+				fmt.Printf("  Registering MessageType: %s\n", *m.Name)
+				md := fd.Messages().ByName(protoreflect.Name(*m.Name))
+				mdType := dynamicpb.NewMessageType(md)
+
+				err = protoregistry.GlobalTypes.RegisterMessage(mdType)
+				if err != nil {
+					panic(err)
+				}
+			}
+		}
+
 	}
 
 	echoRequestMessageDescriptor := fd.Messages().ByName("EchoRequest")
+	echoRequestMessageType := dynamicpb.NewMessageType(echoRequestMessageDescriptor)
+
 	fname := echoRequestMessageDescriptor.Fields().ByName("first_name")
 	lname := echoRequestMessageDescriptor.Fields().ByName("last_name")
-	echoRequestMessageType := dynamicpb.NewMessageType(echoRequestMessageDescriptor)
+
 	reflectEchoRequest := echoRequestMessageType.New()
 	reflectEchoRequest.Set(fname, protoreflect.ValueOfString("sal"))
 	reflectEchoRequest.Set(lname, protoreflect.ValueOfString("amander"))
@@ -71,7 +96,7 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("Encoded EchoRequest %s\n", hex.EncodeToString(in))
+	fmt.Printf("Encoded EchoRequest using protoreflect %s\n", hex.EncodeToString(in))
 
 	// if you wanted to use the actual generated go proto to verify the bytes
 	// import echo "github.com/salrashid123/grpc_dynamic_pb/example/src/echo"
@@ -82,8 +107,21 @@ func main() {
 	// }
 	// fmt.Printf("Unmarshalled using proto %s\n", eresp.FirstName)
 
+	j := `{	"@type": "echo.EchoRequest", "firstName": "sal", "lastName": "amander"}`
+	a, err := anypb.New(echoRequestMessageType.New().Interface())
+	if err != nil {
+		panic(err)
+	}
+
+	err = protojson.Unmarshal([]byte(j), a)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Encoded EchoRequest using protojson and anypb %v\n", hex.EncodeToString(a.Value))
+
 	var out bytes.Buffer
 	enc := lencode.NewEncoder(&out, lencode.SeparatorOpt([]byte{0}))
+	//err = enc.Encode(a.Value)
 	err = enc.Encode(in)
 	if err != nil {
 		panic(err)
@@ -133,5 +171,12 @@ func main() {
 	}
 	msg := echoResponseMessageDescriptor.Fields().ByName("message")
 
-	fmt.Printf("Echoreply.Message: %s\n", pmr.Get(msg).String())
+	fmt.Printf("EchoReply.Message using protoreflect: %s\n", pmr.Get(msg).String())
+
+	s, err := protojson.Marshal(pmr.Interface())
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("EchoReply as string JSON: %s\n", string(s))
+
 }
