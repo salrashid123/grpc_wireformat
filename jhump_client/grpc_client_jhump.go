@@ -72,6 +72,13 @@ func main() {
 		}
 	}
 
+	middlemessageDesc := descriptor.FindMessage("echo.Middle")
+	if middlemessageDesc == nil {
+		panic(fmt.Errorf("Can't find message"))
+	}
+	mmessage := dynamic.NewMessage(middlemessageDesc)
+	mmessage.SetFieldByName("name", "a")
+
 	messageDesc := descriptor.FindMessage("echo.EchoRequest")
 	if messageDesc == nil {
 		panic(fmt.Errorf("Can't find message"))
@@ -79,7 +86,8 @@ func main() {
 	message := dynamic.NewMessage(messageDesc)
 
 	message.SetFieldByName("first_name", "sal")
-	message.SetFieldByName("last_name", "amander")
+	message.SetFieldByName("last_name", "mander")
+	message.SetFieldByName("middle_name", mmessage)
 
 	fmt.Printf("Looking for serviceName %s methodName %s\n", serviceName, methodName)
 

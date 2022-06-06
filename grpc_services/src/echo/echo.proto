@@ -7,9 +7,14 @@ service EchoServer {
   rpc SayHello (EchoRequest) returns (EchoReply) {}
 }
 
+message Middle {
+  string name = 1;
+}
+
 message EchoRequest {
   string first_name = 1;
   string last_name = 2;
+  Middle middle_name = 3;
 }
 
 message EchoReply {

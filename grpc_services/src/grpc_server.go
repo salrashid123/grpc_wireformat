@@ -13,15 +13,16 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/reflection"
 )
 
 var (
+	insecure = flag.Bool("insecure", false, "start without tls")
 	grpcport = flag.String("grpcport", ":50051", "grpcport")
 	tlsCert  = flag.String("tlsCert", "certs/localhost.crt", "TLS Cert")
 	tlsKey   = flag.String("tlsKey", "certs/localhost.key", "TLS Key")
@@ -48,10 +49,13 @@ func NewServer() *Server {
 }
 
 func (s *Server) SayHello(ctx context.Context, in *echo.EchoRequest) (*echo.EchoReply, error) {
-
-	log.Printf("Got rpc: --> %s\n", in.FirstName)
-
-	return &echo.EchoReply{Message: "Hello " + in.FirstName + " " + in.LastName}, nil
+	mname := ""
+	m := in.MiddleName
+	if m != nil {
+		mname = m.Name
+	}
+	log.Printf("Got rpc: --> %s %s %s \n", in.FirstName, mname, in.LastName)
+	return &echo.EchoReply{Message: "Hello " + in.FirstName + " " + mname + " " + in.LastName}, nil
 }
 
 func (s *Server) Check(ctx context.Context, in *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
@@ -86,23 +90,24 @@ func main() {
 		os.Exit(2)
 	}
 
-	certificate, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
-	if err != nil {
-		log.Fatalf("could not load server key pair: %s", err)
-	}
-
-	tlsConfig := tls.Config{
-		Certificates: []tls.Certificate{certificate},
-	}
-	creds := credentials.NewTLS(&tlsConfig)
-
+	sopts := []grpc.ServerOption{grpc.MaxConcurrentStreams(10)}
 	lis, err := net.Listen("tcp", *grpcport)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
+	if !*insecure {
+		certificate, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
+		if err != nil {
+			log.Fatalf("could not load server key pair: %s", err)
+		}
 
-	sopts := []grpc.ServerOption{grpc.MaxConcurrentStreams(10)}
-	sopts = append(sopts, grpc.Creds(creds))
+		tlsConfig := tls.Config{
+			Certificates: []tls.Certificate{certificate},
+		}
+		creds := credentials.NewTLS(&tlsConfig)
+
+		sopts = append(sopts, grpc.Creds(creds))
+	}
 
 	s := grpc.NewServer(sopts...)
 	srv := NewServer()

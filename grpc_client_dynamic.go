@@ -37,7 +37,7 @@ func main() {
 
 	flag.Parse()
 
-	// we're assuming `echo.pb` here has all that we need for this protobuf
+	// read the .pb files and register those message types
 	pbFiles := []string{
 		"grpc_services/src/echo/echo.pb",
 	}
@@ -79,6 +79,18 @@ func main() {
 		}
 	}
 
+	// first create the echo.Middle Message
+	echoRequestInnerMessageType, err := protoregistry.GlobalTypes.FindMessageByName("echo.Middle")
+	if err != nil {
+		panic(err)
+	}
+	echoRequestInnerMessageDescriptor := echoRequestInnerMessageType.Descriptor()
+	// add a field
+	inner_name := echoRequestInnerMessageDescriptor.Fields().ByName("name")
+	reflectEchoInnerRequest := echoRequestInnerMessageType.New()
+	reflectEchoInnerRequest.Set(inner_name, protoreflect.ValueOfString("a"))
+
+	// now create the outer EchoRequest message
 	echoRequestMessageType, err := protoregistry.GlobalTypes.FindMessageByName("echo.EchoRequest")
 	if err != nil {
 		panic(err)
@@ -87,10 +99,14 @@ func main() {
 
 	fname := echoRequestMessageDescriptor.Fields().ByName("first_name")
 	lname := echoRequestMessageDescriptor.Fields().ByName("last_name")
+	mname := echoRequestMessageDescriptor.Fields().ByName("middle_name")
 
+	// now add the fileds and the Middle message
+	// note the types, the message is of type Message
 	reflectEchoRequest := echoRequestMessageType.New()
 	reflectEchoRequest.Set(fname, protoreflect.ValueOfString("sal"))
-	reflectEchoRequest.Set(lname, protoreflect.ValueOfString("amander"))
+	reflectEchoRequest.Set(lname, protoreflect.ValueOfString("mander"))
+	reflectEchoRequest.Set(mname, protoreflect.ValueOfMessage(reflectEchoInnerRequest))
 	fmt.Printf("EchoRequest: %v\n", reflectEchoRequest)
 
 	in, err := proto.Marshal(reflectEchoRequest.Interface())
@@ -101,7 +117,7 @@ func main() {
 	fmt.Printf("Encoded EchoRequest using protoreflect %s\n", hex.EncodeToString(in))
 
 	// if you wanted to use the actual generated go proto to verify the bytes
-	// import echo "github.com/salrashid123/grpc_dynamic_pb/example/src/echo"
+	// import echo "github.com/salrashid123/grpc_wireformat/grpc_services/src/echo"
 	// eresp := &echo.EchoRequest{}
 	// err = proto.Unmarshal(in, eresp)
 	// if err != nil {
@@ -109,7 +125,8 @@ func main() {
 	// }
 	// fmt.Printf("Unmarshalled using proto %s\n", eresp.FirstName)
 
-	j := `{	"@type": "echo.EchoRequest", "firstName": "ddsal", "lastName": "amander"}`
+	// first we're going to generate it by hand and compare it to the manually "typed" format
+	j := `{	"@type": "echo.EchoRequest", "firstName": "sal", "lastName": "mander", "middleName": { "name": "a"}}`
 	a, err := anypb.New(echoRequestMessageType.New().Interface())
 	if err != nil {
 		panic(err)
@@ -123,8 +140,11 @@ func main() {
 
 	var out bytes.Buffer
 	enc := lencode.NewEncoder(&out, lencode.SeparatorOpt([]byte{0}))
-	//err = enc.Encode(a.Value)
-	err = enc.Encode(in)
+	// to send the json->protobuf message
+	err = enc.Encode(a.Value)
+
+	// to send the manually generated message:
+	//err = enc.Encode(in)
 	if err != nil {
 		panic(err)
 	}
@@ -134,6 +154,7 @@ func main() {
 	// make the grpc call
 	// fake out the TLS  if you want to decode using wireshark
 	// https://medium.com/@thrawn01/http-2-cleartext-h2c-client-example-in-go-8167c7a4181e
+	// use this if you want to run the grpc server with the --insecure flag and capture the tcp traces with wireshark
 	// client := http.Client{
 	// 	Transport: &http2.Transport{
 	// 		AllowHTTP: true,
@@ -165,6 +186,9 @@ func main() {
 	reader := bytes.NewReader(out.Bytes())
 	resp, err := client.Post(*url, "application/grpc", reader)
 	if err != nil {
+		log.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
 		log.Fatal(err)
 	}
 	bodyBytes, err := io.ReadAll(resp.Body)

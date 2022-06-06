@@ -1,19 +1,21 @@
 ## gRPC Unary requests the hard way: using protorefelect, dynamicpb and wire-encoding to send messages
 
 
-This is just an academic exercise to create a probuf message and its [wireformat](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md) by basic reflection packages go provides.
+This is just an academic exercise to create a probuf message and its [gRPC wireformat](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md) by basic reflection packages go provides.
 
-`99.99%` of times you just generate go packages for protobuf `echo.pb.go` and its corresponding transport over gRPC `echo_grpc.pb.go`.  You would then use both to 'just invoke' an API:
+Almost always you just generate go packages for protobuf `echo.pb.go` and its corresponding transport over gRPC `echo_grpc.pb.go`.  You would then use both to 'just invoke' an API:
 
 ```golang
-import echo "github.com/salrashid123/grpc_dynamic_pb/example/src/echo"
+import echo "github.com/salrashid123/grpc_wireformat/grpc_services/src/echo"
 
 c := echo.NewEchoServerClient(conn)
-r, err := c.SayHello(ctx, &echo.EchoRequest{FirstName: "sal", LastName: "amander"})
+r, err := c.SayHello(ctx, &echo.EchoRequest{FirstName: "sal", LastName: "mander", MiddleName: &echo.Middle{
+	Name: "a",
+}})
 ```
 
 
-However, just as a way to see what you can do under the hood using 'first principles' we will instead for the following `.proto`:
+However, just as a way to see what you can do under the hood using 'first principles' we will with the following `.proto`:
 
 ```protobuf
 syntax = "proto3";
@@ -25,15 +27,22 @@ service EchoServer {
   rpc SayHello (EchoRequest) returns (EchoReply) {}
 }
 
+message Middle {
+  string name = 1;
+}
+
 message EchoRequest {
   string first_name = 1;
   string last_name = 2;
+  Middle middle_name = 3;
 }
 
 message EchoReply {
   string message = 1;
 }
 ```
+
+Then we will
 
 1. Load and Register its binary protobuf definition `echo.pb`
 2. Create an `EchoRequest` message using [protoreflect](https://pkg.go.dev/google.golang.org/protobuf/reflect/protoreflect) and [dynamicpb](https://pkg.go.dev/google.golang.org/protobuf/types/dynamicpb)
@@ -98,33 +107,46 @@ First step is for your go app to even know about the protobuf...so we need to lo
 	fd, err := protodesc.NewFile(pb, protoregistry.GlobalFiles)
 
 	err = protoregistry.GlobalFiles.RegisterFile(fd)
-
 ```
 
 2. Create Message
 
 Next we construct our `echo.EchoRequest` using the protodescriptor from step 1.
 
-I found two ways to do this:  in `3a` below, we will "strongly type" create a message and in `3b`, we will create a message using a JSON string.   (the latter is more dangerous and is subject to simple typos)
+I found two ways to do this:  in `3a` below, we will "strongly type" create a message and in `3b`, we will create a message using a JSON string.   (the latter is even more subject to simple typos)
 
 ```golang
 
 ```
 
-3. `(a)` Create Message Descriptor add fields
+3. `(a)` Create Message Descriptor for both messages add fields
 
 In the following, you know which type you want to create so we do this by hand:
 
 ```golang
+    // create the inner message
+	echoRequestInnerMessageType, err := protoregistry.GlobalTypes.FindMessageByName("echo.Middle")
+	echoRequestInnerMessageDescriptor := echoRequestInnerMessageType.Descriptor()
+	// add a field
+	inner_name := echoRequestInnerMessageDescriptor.Fields().ByName("name")
+	reflectEchoInnerRequest := echoRequestInnerMessageType.New()
+	reflectEchoInnerRequest.Set(inner_name, protoreflect.ValueOfString("a"))
+
+	// now create the outer EchoRequest message
 	echoRequestMessageType, err := protoregistry.GlobalTypes.FindMessageByName("echo.EchoRequest")
 	echoRequestMessageDescriptor := echoRequestMessageType.Descriptor()
 
+	// setup the outer objects fields
 	fname := echoRequestMessageDescriptor.Fields().ByName("first_name")
 	lname := echoRequestMessageDescriptor.Fields().ByName("last_name")
+	mname := echoRequestMessageDescriptor.Fields().ByName("middle_name")
 
+	// now add the fields and the Middle message
+	// note the types, the message is of type Message
 	reflectEchoRequest := echoRequestMessageType.New()
 	reflectEchoRequest.Set(fname, protoreflect.ValueOfString("sal"))
-	reflectEchoRequest.Set(lname, protoreflect.ValueOfString("amander"))
+	reflectEchoRequest.Set(lname, protoreflect.ValueOfString("mander"))
+	reflectEchoRequest.Set(mname, protoreflect.ValueOfMessage(reflectEchoInnerRequest))
 	fmt.Printf("EchoRequest: %v\n", reflectEchoRequest)
 
 	in, err := proto.Marshal(reflectEchoRequest.Interface())
@@ -139,7 +161,7 @@ Note that we're manually defining everything...its excruciating
 In the following, we will "just create" a message using its JSON format. Remember to set the `@type:` field in json
 
 ```golang
-	j := `{	"@type": "echo.EchoRequest", "firstName": "sal",	"lastName": "amander"}`
+	j := `{	"@type": "echo.EchoRequest", "firstName": "sal", "lastName": "mander", "middleName": {"name": "a"}}`
 	a, err := anypb.New(echoRequestMessageType.New().Interface())
 
 	err = protojson.Unmarshal([]byte(j), a)
@@ -151,12 +173,18 @@ In the following, we will "just create" a message using its JSON format. Remembe
 Either way, we need to convert the proto message into a wireformat.  For this we use [lencode](https://github.com/psanford/lencode)
 
 ```golang
-	in, err := proto.Marshal(reflectEchoRequest.Interface())
 	var out bytes.Buffer
 	enc := lencode.NewEncoder(&out, lencode.SeparatorOpt([]byte{0}))
+
+	// (a) to send the manually generated message:
+	err = enc.Encode(in)
+
+	// (b) to send the json->protobuf message
+	err = enc.Encode(a.Value)
 ```
 
-You might be asking ...wtf is `lencode.SeparatorOpt([]byte{0})`
+You might be asking ...WTF is `lencode.SeparatorOpt([]byte{0})`?!
+
 
 ...weeellll, thats just the wireformat position that signals compression..it works here.  See [parsing gRPC messages from Envoy TAP](https://github.com/psanford/lencode/issues/5)
 
@@ -164,21 +192,15 @@ You might be asking ...wtf is `lencode.SeparatorOpt([]byte{0})`
 
 We're now ready to transmit the wireformat message to our grpc server
 
-
-We're going to have to fake out TLS here some reasons described [here](https://medium.com/@thrawn01/http-2-cleartext-h2c-client-example-in-go-8167c7a4181e)
-
-```bash
+```golang
 	client := http.Client{
 		Transport: &http2.Transport{
-			AllowHTTP: true,
-			DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-				return net.Dial(network, addr)
-			},
+			TLSClientConfig: &tlsConfig,
 		},
 	}
 
 	reader := bytes.NewReader(out.Bytes())
-	resp, err := client.Post("http://localhost:50051/echo.EchoServer/SayHello", "application/grpc", reader)
+	resp, err := client.Post("https://localhost:50051/echo.EchoServer/SayHello", "application/grpc", reader)
 ```
 
 6. Recieve the wireformat response
@@ -222,15 +244,23 @@ TO run it end-to end, keep the server running and invoke the client
 
 ```bash
 $ go run grpc_client_dynamic.go 
-		Registering MessageType: EchoRequest
-		Registering MessageType: EchoReply
-		EchoRequest: first_name:"sal"  last_name:"amander"
-		Encoded EchoRequest using protoreflect 1207616d616e6465720a0373616c
-		Encoded EchoRequest using protojson and anypb 0a0373616c1207616d616e646572
-		wire encoded EchoRequest: 000000000e1207616d616e6465720a0373616c
-		wire encoded EchoReply 00000000130a1148656c6c6f2073616c20616d616e646572
-		Encoded EchoReply 0a1148656c6c6f2073616c20616d616e646572
-		Echoreply.Message: Hello sal amander
+
+	Loading package echo
+	Registering MessageType: Middle
+	Registering MessageType: EchoRequest
+	Registering MessageType: EchoReply
+
+	EchoRequest: first_name:"sal"  last_name:"mander"  middle_name:{name:"a"}
+
+	Encoded EchoRequest using protoreflect 0a0373616c12066d616e6465721a030a0161
+	Encoded EchoRequest using protojson and anypb 0a0373616c12066d616e6465721a030a0161
+
+	wire encoded EchoRequest: 00000000120a0373616c12066d616e6465721a030a0161
+	wire encoded EchoReply 00000000140a1248656c6c6f2073616c2061206d616e646572
+
+	Encoded EchoReply 0a1248656c6c6f2073616c2061206d616e646572
+	EchoReply.Message using protoreflect: Hello sal a mander
+	EchoReply as string JSON: {"message":"Hello sal a mander"}
 ```
 
 What the output shows is how we loaded the `echo.pb`, then constructed the Message from either explicitly creating it or by converting a JSON Message over. 
@@ -243,7 +273,7 @@ Did i mention you can also use `curl` to call the endpoint...
 the trick is to use the wire encoded format (since,  you know, curl send stuff on the wire
 
 ```bash
-echo -n '000000000e0a0373616c1207616d616e646572' | xxd -r -p - frame.bin
+echo -n '00000000120a0373616c12066d616e6465721a030a0161' | xxd -r -p - frame.bin
  
 curl -v  --raw -X POST --http2-prior-knowledge  \
     -H "Content-Type: application/grpc" \
@@ -256,12 +286,14 @@ to decode
 
 ```bash
 $ xxd -p resp.bin 
-00000000130a1148656c6c6f2073616c20616d616e646572
+00000000140a1248656c6c6f2073616c2061206d616e646572
 
-$ echo -n "0a1148656c6c6f2073616c20616d616e646572" | xxd -r -p | protoc --decode_raw
-1: "Hello sal amander"
-
+## remove the prefix headers 0000000014
+$ echo -n "0a1248656c6c6f2073616c2061206d616e646572" | xxd -r -p | protoc --decode_raw
+1: "Hello sal a mander"
 ```
+
+Now look at the message decoded with wireshark
 
 ![images/resp.png](images/resp.png)
 
@@ -280,15 +312,26 @@ cd jhump_client/
 $ go run grpc_client_jhump.go 
 > service echo.EchoServer
   * method echo.EchoServer.SayHello (echo.EchoRequest) echo.EchoReply
+- message echo.Middle
 - message echo.EchoRequest
 - message echo.EchoReply
 Looking for serviceName echo.EchoServer methodName SayHello
 Response: {
-	"message": "Hello sal amander"
+	"message": "Hello sal a mander"
 }
 ```
 
+#### Wireshark decoding
+
+If you want ot see the wireshark dissection of the protobufs, run
+
+```bash
+echo "\"$PWD/grpc_services/src/echo/\", \"TRUE\"" > ~/.config/wireshark/protobuf_search_paths
+wireshark trace.cap
+```
+
 ---
+
 #### gRPC Reflection
 
 The default gRPC server here also has [gRPC Reflection](https://github.com/grpc/grpc/blob/master/doc/server-reflection.md) enabled for inspection.
@@ -298,12 +341,12 @@ To use this, you have to install [grpc_cli](https://github.com/grpc/grpc/blob/ma
 Anyway
 
 ```bash
-$ ./grpc_cli ls localhost:50051
+$ grpc_cli ls localhost:50051
 	echo.EchoServer
 	grpc.health.v1.Health
 	grpc.reflection.v1alpha.ServerReflection
 
-$ ./grpc_cli ls localhost:50051 echo.EchoServer -l
+$ grpc_cli ls localhost:50051 echo.EchoServer -l
 	filename: src/echo/echo.proto
 	package: echo;
 	service EchoServer {
@@ -311,18 +354,20 @@ $ ./grpc_cli ls localhost:50051 echo.EchoServer -l
 	}
 
 
-$ ./grpc_cli ls localhost:50051 echo.EchoServer.SayHello -l
+$ grpc_cli ls localhost:50051 echo.EchoServer.SayHello -l
 	rpc SayHello(echo.EchoRequest) returns (echo.EchoReply) {}
 
-$ ./grpc_cli type localhost:50051 echo.EchoRequest
+$ grpc_cli type localhost:50051 echo.EchoRequest
 	message EchoRequest {
-		string first_name = 1 [json_name = "firstName"];
-		string last_name = 2 [json_name = "lastName"];
+	string first_name = 1 [json_name = "firstName"];
+	string last_name = 2 [json_name = "lastName"];
+	.echo.Middle middle_name = 3 [json_name = "middleName"];
 	}
 
-./grpc_cli call localhost:50051 echo.EchoServer.SayHello "first_name: 'sal' last_name: 'amander'"
+
+grpc_cli call localhost:50051 echo.EchoServer.SayHello "first_name: 'sal' last_name: 'mander' middle_name: {name: 'a'}"
 	connecting to localhost:50051
-	message: "Hello sal amander"
+	message: "Hello sal a mander"
 	Rpc succeeded with OK status
 ```
 

@@ -23,9 +23,9 @@ RUN export GOBIN=/app/bin && go install src/grpc_server.go
 RUN export GOBIN=/app/bin && go install src/grpc_client.go
 
 FROM gcr.io/distroless/base
-COPY --from=build /app/certs/localhost.crt /certs
-COPY --from=build /app/certs/localhost.key /certs
-COPY --from=build /app/certs/tls-ca-chain.pem /certs
+COPY --from=build /app/certs/localhost.crt /certs/
+COPY --from=build /app/certs/localhost.key /certs/
+COPY --from=build /app/certs/tls-ca-chain.pem /certs/
 COPY --from=build /app/bin/grpc_server /
 COPY --from=build /app/bin/grpc_client /
 
