@@ -371,6 +371,37 @@ grpc_cli call localhost:50051 echo.EchoServer.SayHello "first_name: 'sal' last_n
 	Rpc succeeded with OK status
 ```
 
+
+#### Streaming
+
+To decode streaming, try to loop over till EOF on the payload
+
+see [gRPC With Envoy TAP](https://github.com/salrashid123/envoy_tap/blob/main/grpc/parser/main.go#L88-L104)
+
+somethign like 
+
+```golang
+				respMessage := lencode.NewDecoder(bytesReader, lencode.SeparatorOpt([]byte{0}))
+				for {
+					respMessageBytes, err := respMessage.Decode()
+					if err != nil {
+						if err == io.EOF {
+							break
+						}
+						log.Fatalf("could not Decode  %v", err)
+						return err
+					}
+					echoResponseMessageType, err := protoregistry.GlobalTypes.FindMessageByName("echo.EchoReply")
+					pmr := echoResponseMessageType.New()
+					echoResponseMessageDescriptor := echoResponseMessageType.Descriptor()
+					msg := echoResponseMessageDescriptor.Fields().ByName("message")
+					err = proto.Unmarshal(respMessageBytes, pmr.Interface())
+
+					fmt.Printf("Encoded EchoResponse using protojson and anypb [%s]\n", pmr.Get(msg).String())
+				}
+			}
+```
+
 ---
 
 done

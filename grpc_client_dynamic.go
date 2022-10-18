@@ -201,6 +201,8 @@ func main() {
 	bytesReader := bytes.NewReader(bodyBytes)
 	// now unpack the wiremessage to get to the unary response
 	respMessage := lencode.NewDecoder(bytesReader, lencode.SeparatorOpt([]byte{0}))
+	// note for streaming, you can just loop till EOF:
+	//  https://github.com/salrashid123/envoy_tap/blob/main/grpc/parser/main.go#L88-L104
 	respMessageBytes, err := respMessage.Decode()
 	if err != nil {
 		log.Fatal(err)
